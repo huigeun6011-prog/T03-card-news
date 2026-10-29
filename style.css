@@ -505,3 +505,61 @@ body.dragging #stageWrap::after {
   border-color: var(--accent);
   background: var(--accent-pale);
 }
+#filenameModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#filenameBox {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 340px;
+  max-width: 440px;
+  box-shadow: var(--shadow-lg);
+  animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#filenameTitle {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.filename-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 20px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.filename-input-row:focus-within {
+  border-color: var(--accent-deep);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+#filenameInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 8px 0;
+}
+#filenameInput::placeholder { color: var(--text-soft); }
+#filenameExt {
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 600;
+  user-select: none;
+}

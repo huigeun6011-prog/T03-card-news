@@ -68,6 +68,13 @@
 
   const minimapScaleCache = { scale: 1, w: 0, h: 0, offsetX: 0, offsetY: 0 };
 
+  const filenameModal   = $('filenameModal');
+  const filenameInput   = $('filenameInput');
+  const filenameExt     = $('filenameExt');
+  const filenameTitle   = $('filenameTitle');
+  const filenameConfirm = $('filenameConfirm');
+  const filenameCancel  = $('filenameCancel');
+
   // ---------- 폰트 리스트 채우기 ----------
   (function fillFontList() {
     const dl = $('fontList');
@@ -940,14 +947,7 @@
     const f = e.dataTransfer && e.dataTransfer.files;
     if (f && f.length) handleIncomingFiles(Array.from(f));
   });
-
-  stageWrap.addEventListener('click', e => {
-    if (e.target === stageWrap && !bgImage && currentTool === 'select') fileInput.click();
-  });
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) handleIncomingFile(fileInput.files[0]);
-    fileInput.value = '';
-  });
+  
 
   // ---------- 텍스트 추가 (텍스트 도구용) ----------
   function addTextAt(x, y) {
@@ -1040,6 +1040,47 @@
     pushHistory();
   }
   deleteBtn.addEventListener('click', deleteSelected);
+
+  let filenameResolve = null;
+
+  function askFilename(title, defaultName, ext) {
+    filenameTitle.textContent = title;
+    filenameInput.value = defaultName;
+    filenameExt.textContent = ext;
+    filenameModal.hidden = false;
+    filenameInput.focus();
+    filenameInput.select();    
+    return new Promise(resolve => { filenameResolve = resolve; });
+  }
+
+  function closeFilename(result) {
+    filenameModal.hidden = true;
+    if (filenameResolve) {
+      filenameResolve(result);
+      filenameResolve = null;
+    }
+  }
+
+  filenameConfirm.addEventListener('click', () => {
+    let name = filenameInput.value.trim();
+    if (!name) name = filenameInput.placeholder;
+    if (name.toLowerCase().endsWith('.json')) name = name.slice(0, -5);
+    if (name.toLowerCase().endsWith('.png')) name = name.slice(0, -4);
+    closeFilename(name);
+  });
+  filenameCancel.addEventListener('click', () => closeFilename(null));
+  filenameModal.addEventListener('click', e => {
+    if (e.target === filenameModal) closeFilename(null);
+  });
+  filenameInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      filenameConfirm.click();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFilename(null);
+    }
+  });
 
   // ---------- 미니맵 조작 ----------
   let minimapDragging = false;
@@ -1380,7 +1421,21 @@
   fitViewBtn.addEventListener('click', fitView);
 
   // ---------- JSON 저장 ----------
-  saveJsonBtn.addEventListener('click', () => {
+  saveJsonBtn.addEventListener('click', async () => {
+    // 저장 전 주의 안내
+    const proceed = await openModal(
+      'JSON 저장 안내\n\n' +
+      '이미지는 JSON에 저장되지 않습니다.\n' +
+      '텍스트·레이어 배치·비율 등 편집 상태만 저장됩니다.\n' +
+      '불러올 때 이미지는 다시 업로드해야 합니다.\n\n' +
+      '계속할까요?'
+    );
+    if (!proceed) return;
+
+    const defaultName = 'cardnews-' + currentRatio.replace(':', 'x') + '-' + formatDate(new Date());
+    const name = await askFilename('JSON 파일명', defaultName, '.json');
+    if (name === null) return;
+
     const snap = snapshot();
     snap.objects.forEach(o => { if (o.type === 'image') delete o.src; });
     snap.hasImage = !!bgImage;
@@ -1391,7 +1446,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'cardnews-' + currentRatio.replace(':', 'x') + '.json';
+    a.download = name + '.json';
     a.click();
     URL.revokeObjectURL(url);
     showToast('JSON으로 저장되었습니다.', 'success');
@@ -1408,7 +1463,7 @@
       const snap = JSON.parse(text);
       const err = validateSnapshot(snap);
       if (err) { showToast('불러오기 실패: ' + err); return; }
-      await loadSnapshotWithImagePrompt(snap, '불러온 JSON');
+      await loadSnapshotWithImagePrompt(snap);
     } catch (e) {
       console.warn(e);
       showToast('불러오기 실패: JSON 형식이 아닙니다.');
@@ -1427,32 +1482,36 @@
     return null;
   }
 
-  async function loadSnapshotWithImagePrompt(snap, sourceLabel) {
-    const hasImage = snap.hasImage || snap.objects.some(o => o.type === 'image');
-    if (hasImage) {
-      const ok = await openModal(
-        sourceLabel + '에 이미지가 포함되어 있지 않습니다.\n' +
-        '같은 이미지를 다시 업로드하면 편집 상태가 그대로 복원됩니다.\n' +
-        '(취소하면 텍스트만 복원됩니다.)'
-      );
-      const textOnly = JSON.parse(JSON.stringify(snap));
-      textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
-      if (ok) {
-        pendingImageUpload = { snap };
-        await restoreSnapshot(textOnly);
-        showToast('이미지를 드롭하거나 선택하세요.', 'success');
-      } else {
-        await restoreSnapshot(textOnly);
-        showToast('텍스트만 복원되었습니다.', 'success');
-      }
-      return;
+  async function loadSnapshotWithImagePrompt(snap) {
+    // 이미지 오브젝트는 제외 (텍스트만 복원)
+    const textOnly = JSON.parse(JSON.stringify(snap));
+    textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
+    // imageNatural은 텍스트 좌표 해석에 쓰이지만, 이미지가 없으면 캔버스 기본 크기 기준으로 복원
+    // 원본 비율/캔버스 크기는 유지
+    await restoreSnapshot(textOnly);
+
+    const hadImage = snap.hasImage || snap.objects.some(o => o.type === 'image');
+    if (hadImage) {
+      showToast('텍스트만 복원되었습니다. 이미지는 다시 업로드하세요.', 'success');
+    } else {
+      showToast('불러왔습니다.', 'success');
     }
-    await restoreSnapshot(snap);
-    showToast('불러왔습니다.', 'success');
   }
 
   // ---------- PNG 내보내기 ----------
-  exportBtn.addEventListener('click', () => {
+  function formatDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${y}${m}${day}-${hh}${mm}`;
+  }
+  exportBtn.addEventListener('click', async () => {
+    const defaultName = 'cardnews-' + currentRatio.replace(':', 'x') + '-' + formatDate(new Date());
+    const name = await askFilename('PNG 파일명', defaultName, '.png');
+    if (name === null) return;
+
     clearSnapGuides();
     const prevBgColor = canvasEl.style.backgroundColor;
     const prevBgImage = canvasEl.style.backgroundImage;
@@ -1470,7 +1529,7 @@
 
     const a = document.createElement('a');
     a.href = dataURL;
-    a.download = 'cardnews-' + currentRatio.replace(':', 'x') + '.png';
+    a.download = name + '.png';
     a.click();
     showToast('PNG로 저장되었습니다.', 'success');
   });
@@ -1499,21 +1558,13 @@
         const snap = JSON.parse(saved);
         const err = validateSnapshot(snap);
         if (!err && snap.objects.length > 0) {
-          if (snap.hasImage) {
-            openModal('이전 작업이 임시저장되어 있습니다.\n이미지가 포함되어 있지 않으니 같은 이미지를 다시 업로드하면 복원됩니다.')
-              .then(ok => {
-                const textOnly = JSON.parse(JSON.stringify(snap));
-                textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
-                if (ok) {
-                  pendingImageUpload = { snap };
-                  restoreSnapshot(textOnly);
-                  showToast('이미지를 드롭하거나 선택하세요.', 'success');
-                } else {
-                  restoreSnapshot(textOnly);
-                }
-              });
-          } else {
-            restoreSnapshot(snap);
+          if (!err && snap.objects.length > 0) {
+            const textOnly = JSON.parse(JSON.stringify(snap));
+            textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
+            restoreSnapshot(textOnly);
+            if (snap.hasImage) {
+              showToast('임시저장에서 텍스트만 복원되었습니다. 이미지는 다시 업로드하세요.');
+            }
           }
         }
       } catch (e) { console.warn('임시저장 복원 실패:', e); }
