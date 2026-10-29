@@ -110,9 +110,17 @@ html, body {
 .tool:disabled { opacity: 0.35; cursor: default; }
 .tool.small {
   aspect-ratio: auto;
-  padding: 8px 4px;
+  padding: 8px 4px 6px;
+  gap: 3px;
 }
 .tool.small svg { width: 20px; height: 20px; }
+.tool.small span {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  line-height: 1;
+  color: inherit;
+}
 .tool.primary {
   background: linear-gradient(180deg, #2dd4bf 0%, #14b8a6 100%);
   border-color: transparent;
@@ -489,4 +497,11 @@ body.dragging #stageWrap::after {
   background: rgba(45,212,191,0.06);
   backdrop-filter: blur(2px);
   pointer-events: none; z-index: 5;
+}
+#layerList li.dragging {
+  opacity: 0.4;
+}
+#layerList li.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-pale);
 }

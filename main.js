@@ -743,22 +743,96 @@
       showToast('이미지가 추가되었습니다.', 'success');
     });
   }
-  async function handleIncomingFile(file) {
-    const r = await validateImageFile(file);
-    if (!r.ok) { showToast('거절됨: ' + r.reason); return; }
+  function loadBackgroundImageAsync(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      fabric.Image.fromURL(url, img => {
+        if (bgImage) canvas.remove(bgImage);
+        imageNatural = { w: img.width, h: img.height };
+        const s = computeCanvasSize(currentRatio, img.width, img.height);
+        canvas.setWidth(s.w);
+        canvas.setHeight(s.h);
+        img.set({
+          selectable: true, hasControls: true, hasBorders: true,
+          lockRotation: true, lockUniScaling: true, hoverCursor: 'move',
+          originX: 'left', originY: 'top',
+        });
+        img.layerType = 'image';
+        img.name = file.name || '이미지';
+        img._src = url;
+        placeImageCentralCrop(img);
+        canvas.add(img);
+        canvas.sendToBack(img);
+        bgImage = img;
+        emptyHint.style.display = 'none';
+        applyViewToDOM();
+        fitView();
+        refreshLayers();
+        pushHistory();
+        showToast('배경 이미지가 추가되었습니다.', 'success');
+        resolve();
+      });
+    });
+  }
+  function addImageAsObject(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      fabric.Image.fromURL(url, img => {
+        // 캔버스 중앙에 적당히 배치 (배경보다 작게)
+        const maxW = canvas.getWidth() * 0.6;
+        const maxH = canvas.getHeight() * 0.6;
+        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+        img.set({
+          left: (canvas.getWidth() - img.width * scale) / 2,
+          top: (canvas.getHeight() - img.height * scale) / 2,
+          scaleX: scale, scaleY: scale,
+          selectable: true, hasControls: true, hasBorders: true,
+          lockRotation: true, lockUniScaling: true, hoverCursor: 'move',
+        });
+        img.layerType = 'image';
+        img.name = file.name || '이미지';
+        img._src = url;
+        canvas.add(img);
+        canvas.bringToFront(img);
+        refreshLayers();
+        pushHistory();
+        showToast('이미지가 추가되었습니다.', 'success');
+        resolve();
+      });
+    });
+  }
+  async function handleIncomingFiles(files) {
+    const valid = [];
+    for (const f of files) {
+      const r = await validateImageFile(f);
+      if (r.ok) valid.push(f);
+      else showToast('거절됨: ' + r.reason);
+    }
+    if (valid.length === 0) return;
+
+    // pendingImageUpload (JSON 복원 재개) 처리
     if (pendingImageUpload) {
       const snap = pendingImageUpload.snap;
       pendingImageUpload = null;
-      await restoreWithNewImage(snap, file);
+      await restoreWithNewImage(snap, valid[0]);
+      // 나머지는 추가 오브젝트로 붙이기 (필요 시)
+      for (let i = 1; i < valid.length; i++) {
+        await addImageAsObject(valid[i]);
+      }
       return;
     }
-    if (bgImage) {
-      const ok = await openModal('이미 올라온 이미지가 있습니다. 새 이미지로 교체할까요?');
-      if (!ok) return;
-    }
-    loadBackgroundImage(file);
-  }
 
+    // 배경 이미지가 이미 있으면 전부 추가 오브젝트로
+    if (bgImage) {
+      for (const f of valid) await addImageAsObject(f);
+      return;
+    }
+
+    // 배경 이미지가 없으면 첫 번째를 배경으로
+    const [first, ...rest] = valid;
+    await loadBackgroundImageAsync(first);
+    for (const f of rest) await addImageAsObject(f);
+  }
   async function restoreWithNewImage(snap, file) {
     const url = URL.createObjectURL(file);
     await new Promise(resolve => {
@@ -824,25 +898,47 @@
   }
 
   // ---------- 드래그 앤 드롭 ----------
+  // 파일 드래그 여부 판단
+  function isFileDrag(e) {
+    if (!e.dataTransfer) return false;
+    const types = e.dataTransfer.types;
+    if (!types) return false;
+    for (let i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
   let dragDepth = 0;
+
   window.addEventListener('dragenter', e => {
-    e.preventDefault(); dragDepth++;
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
     document.body.classList.add('dragging');
   });
+
   window.addEventListener('dragover', e => {
+    if (!isFileDrag(e)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   });
+
   window.addEventListener('dragleave', e => {
-    e.preventDefault(); dragDepth = Math.max(0, dragDepth - 1);
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
     if (!dragDepth) document.body.classList.remove('dragging');
   });
+
   window.addEventListener('drop', e => {
+    // 레이어 드래그(내부)는 별도 처리이므로 무시
+    if (!isFileDrag(e)) return;
     e.preventDefault();
     dragDepth = 0;
     document.body.classList.remove('dragging');
     const f = e.dataTransfer && e.dataTransfer.files;
-    if (f && f[0]) handleIncomingFile(f[0]);
+    if (f && f.length) handleIncomingFiles(Array.from(f));
   });
 
   stageWrap.addEventListener('click', e => {
@@ -1086,8 +1182,39 @@
   });
 
   // ---------- 레이어 패널 ----------
+  function reorderLayer(fromUid, toUid) {
+    const objs = canvas.getObjects().filter(o => o.layerType);
+    const fromObj = objs.find(o => String(o.__uid) === fromUid);
+    const toObj = objs.find(o => String(o.__uid) === toUid);
+    if (!fromObj || !toObj || fromObj === toObj) return;
+
+    const listOrder = Array.from(layerListEl.querySelectorAll('li')).map(li => li.dataset.uid);
+    const fromIdx = listOrder.indexOf(fromUid);
+    const toIdx = listOrder.indexOf(toUid);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const newList = listOrder.slice();
+    newList.splice(fromIdx, 1);
+    newList.splice(toIdx, 0, fromUid);
+
+    // newList는 위→아래. canvas는 뒤→앞이므로 역순.
+    const uidToObj = {};
+    objs.forEach(o => { uidToObj[String(o.__uid)] = o; });
+    const backToFront = newList.slice().reverse();
+
+    const nonLayer = canvas._objects.filter(o => !o.layerType);
+    const layerObjsInOrder = backToFront.map(uid => uidToObj[uid]).filter(Boolean);
+
+    canvas._objects = [...layerObjsInOrder, ...nonLayer];
+    canvas.requestRenderAll();
+    refreshLayers();
+    pushHistory();
+  }
   function refreshLayers() {
-    const objs = canvas.getObjects().filter(o => o.layerType).slice().reverse();
+    const objs = canvas.getObjects()
+      .filter(o => o.layerType)   // bgImage 제외 안 함
+      .slice()
+      .reverse();
     layerListEl.innerHTML = '';
     layerCount.textContent = objs.length;
     objs.forEach(obj => {
@@ -1108,6 +1235,40 @@
       layerListEl.appendChild(li);
     });
     highlightLayerList();
+    // 레이어 순서 드래그
+    let dragLayerUid = null;
+    layerListEl.querySelectorAll('li').forEach(li => {
+      li.draggable = true;
+
+      li.addEventListener('dragstart', e => {
+        dragLayerUid = li.dataset.uid;
+        li.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      li.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        // 위치 시각 효과
+        layerListEl.querySelectorAll('li').forEach(x => x.classList.remove('drag-over'));
+        li.classList.add('drag-over');
+      });
+      li.addEventListener('dragleave', () => {
+        li.classList.remove('drag-over');
+      });
+      li.addEventListener('drop', e => {
+        e.preventDefault();
+        li.classList.remove('drag-over');
+        const fromUid = dragLayerUid;
+        const toUid = li.dataset.uid;
+        dragLayerUid = null;
+        if (!fromUid || fromUid === toUid) return;
+        reorderLayer(fromUid, toUid);
+      });
+      li.addEventListener('dragend', () => {
+        li.classList.remove('dragging');
+        layerListEl.querySelectorAll('li').forEach(x => x.classList.remove('drag-over'));
+      });
+    });
   }
   function highlightLayerList() {
     const active = canvas.getActiveObject();
