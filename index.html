@@ -108,7 +108,33 @@
 
         <button id="deleteBtn" type="button" class="danger">선택 삭제</button>
       </div>
+      <div id="imageControls" hidden>
+        <label class="field-label">제작 구분</label>
+        <div class="inline-row credit-radio-row">
+          <label>
+            <input type="radio" name="creditType" value="self" checked>
+            <span>본인 제작</span>
+          </label>
+          <label>
+            <input type="radio" name="creditType" value="external">
+            <span>외부 이미지</span>
+          </label>
+        </div>
+        <div id="externalCredit" hidden>
+          <label class="field-label">출처 URL</label>
+          <input id="creditUrlInput" type="text" placeholder="https://...">
+          <label class="field-label">허가 근거</label>
+          <select id="creditBasisInput">
+            <option value="license">라이선스명</option>
+            <option value="terms">이용약관</option>
+            <option value="class">수업 제공 표기</option>
+          </select>
+          <label class="field-label">상세</label>
+          <input id="creditDetailInput" type="text" placeholder="CC BY 4.0, Unsplash License 등">
+        </div>
+      </div>
     </div>
+    
 
     <!-- 2) 레이어 -->
     <div class="panel-section" id="layerSection">

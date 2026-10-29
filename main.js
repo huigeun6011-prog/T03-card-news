@@ -28,6 +28,11 @@
 
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
+  const imageControls   = $('imageControls');
+  const externalCredit  = $('externalCredit');
+  const creditUrlInput  = $('creditUrlInput');
+  const creditBasisInput= $('creditBasisInput');
+  const creditDetailInput = $('creditDetailInput');
   const undoBtn     = $('undoBtn');
   const redoBtn     = $('redoBtn');
   const exportBtn   = $('exportBtn');
@@ -86,6 +91,10 @@
   })();
 
   // ---------- 토스트 / 모달 ----------
+  function updateEmptyHint() {
+    const hasAnyLayer = canvas.getObjects().some(o => o.layerType);
+    emptyHint.style.display = hasAnyLayer ? 'none' : '';
+  }
   function showToast(msg, type) {
     const el = document.createElement('div');
     el.className = 'toast' + (type === 'success' ? ' success' : '');
@@ -950,6 +959,42 @@
   
 
   // ---------- 텍스트 추가 (텍스트 도구용) ----------
+  // ---------- 이미지 출처 이벤트 ----------
+(function setupCreditEvents() {
+  const imageControls = $('imageControls');
+  if (!imageControls) return;
+  const externalCredit = $('externalCredit');
+  const creditUrlInput = $('creditUrlInput');
+  const creditBasisInput = $('creditBasisInput');
+  const creditDetailInput = $('creditDetailInput');
+
+  function applyCredit() {
+    const img = canvas.getActiveObject();
+    if (!img || img.layerType !== 'image') return;
+    const type = imageControls.querySelector('input[name="creditType"]:checked').value;
+    if (type === 'self') {
+      img.credit = { type: 'self' };
+      externalCredit.hidden = true;
+    } else {
+      img.credit = {
+        type: 'external',
+        url: creditUrlInput.value.trim(),
+        basis: creditBasisInput.value,
+        detail: creditDetailInput.value.trim(),
+      };
+      externalCredit.hidden = false;
+    }
+    refreshAllCredits();
+    pushHistory();
+  }
+
+  imageControls.querySelectorAll('input[name="creditType"]').forEach(r => {
+    r.addEventListener('change', applyCredit);
+  });
+  creditUrlInput.addEventListener('input', applyCredit);
+  creditBasisInput.addEventListener('change', applyCredit);
+  creditDetailInput.addEventListener('input', applyCredit);
+})();
   function addTextAt(x, y) {
     const t = new fabric.IText('텍스트를 입력하세요', {
       left: x, top: y,
@@ -959,6 +1004,7 @@
       textAlign: 'left',
       editable: true,
       paintFirst: 'stroke',
+      objectCaching: false,   // ← 추가
     });
     t.layerType = 'text';
     t.name = '텍스트';
@@ -972,17 +1018,52 @@
   }
 
   // ---------- 선택 UI ----------
+  function updateImageControls(img) {
+    const imageControls = $('imageControls');
+    const externalCredit = $('externalCredit');
+    const creditUrlInput = $('creditUrlInput');
+    const creditBasisInput = $('creditBasisInput');
+    const creditDetailInput = $('creditDetailInput');
+    if (!imageControls) return;
+
+    const credit = img.credit || { type: 'self' };
+    imageControls.querySelectorAll('input[name="creditType"]').forEach(r => {
+      r.checked = (r.value === credit.type);
+    });
+    if (credit.type === 'external') {
+      externalCredit.hidden = false;
+      creditUrlInput.value = credit.url || '';
+      creditBasisInput.value = credit.basis || 'license';
+      creditDetailInput.value = credit.detail || '';
+    } else {
+      externalCredit.hidden = true;
+    }
+  }
   function updateSelectionUI() {
     const objs = canvas.getActiveObjects();
     const single = objs.length === 1 ? objs[0] : null;
     const isSingleText = single && single.layerType === 'text';
+    const isSingleImage = single && single.layerType === 'image';
 
     textControls.hidden = !isSingleText;
-    textEmpty.hidden = !!isSingleText;
+    
+    // 이미지 컨트롤 표시/숨김
+    const imageControlsEl = document.getElementById('imageControls');
+    if (imageControlsEl) {
+      imageControlsEl.hidden = !isSingleImage;
+    }
+    
+    textEmpty.hidden = !!isSingleText || !!isSingleImage || objs.length > 1;
     deleteBtn.disabled = objs.length === 0;
 
     if (isSingleText) updateTextControls();
+    // 이미지일 경우 기존에 있던 updateImageControls 호출
+    if (isSingleImage && typeof updateImageControls === 'function') {
+      updateImageControls(single);
+    }
+    
     highlightLayerList();
+    updateEmptyHint(); // 선택이 바뀔 때도 문구 상태 갱신
   }
   function updateTextControls() {
     const obj = canvas.getActiveObject();
@@ -1105,7 +1186,53 @@
     if (minimapDragging) minimapToPan(e.clientX, e.clientY);
   });
   window.addEventListener('mouseup', () => { minimapDragging = false; });
-
+  // ---------- 이미지 출처 이벤트 ----------
+  function validateCredits() {
+    const imgs = canvas.getObjects().filter(o => o.layerType === 'image');
+    const missing = imgs.filter(img => {
+      const c = img.credit;
+      if (!c) return true;
+      if (c.type === 'self') return false;
+      if (c.type === 'external') {
+        if (!c.url) return true;
+        if (!c.basis) return true;
+        // basis가 license/terms면 detail 필수
+        if (!c.detail) return true;
+        return false;
+      }
+      return true;
+    });
+    return missing.length === 0;
+  }
+  function applyCreditToActive() {
+    const img = canvas.getActiveObject();
+    if (!img || img.layerType !== 'image') return;
+    const type = imageControls.querySelector('input[name="creditType"]:checked').value;
+    if (type === 'self') {
+      img.credit = { type: 'self' };
+      externalCredit.hidden = true;
+    } else {
+      img.credit = {
+        type: 'external',
+        url: creditUrlInput.value.trim(),
+        basis: creditBasisInput.value,
+        detail: creditDetailInput.value.trim(),
+      };
+      externalCredit.hidden = false;
+    }
+    refreshAllCredits();
+    pushHistory();
+    imageControls.querySelectorAll('label').forEach(lbl => {
+      const input = lbl.querySelector('input[type="radio"]');
+      lbl.classList.toggle('active', input && input.checked);
+    })
+  }
+  imageControls.querySelectorAll('input[name="creditType"]').forEach(r => {
+    r.addEventListener('change', applyCreditToActive);
+  });
+  creditUrlInput.addEventListener('input', applyCreditToActive);
+  creditBasisInput.addEventListener('change', applyCreditToActive);
+  creditDetailInput.addEventListener('input', applyCreditToActive);
   // ---------- 텍스트 속성 이벤트 ----------
   fontFamilyInput.addEventListener('focus', () => {
     fontFamilyInput.dataset.prev = fontFamilyInput.value;
@@ -1320,6 +1447,8 @@
   }
 
   // ---------- Fabric 이벤트 ----------
+  canvas.on('object:added', updateEmptyHint);
+  canvas.on('object:removed', updateEmptyHint);
   canvas.on('selection:created', updateSelectionUI);
   canvas.on('selection:updated', updateSelectionUI);
   canvas.on('selection:cleared', updateSelectionUI);
@@ -1422,6 +1551,10 @@
 
   // ---------- JSON 저장 ----------
   saveJsonBtn.addEventListener('click', async () => {
+    if (!validateCredits()) {
+      showToast('모든 이미지의 출처 정보를 입력해야 저장할 수 있습니다.');
+      return;
+    }
     // 저장 전 주의 안내
     const proceed = await openModal(
       'JSON 저장 안내\n\n' +
@@ -1508,6 +1641,10 @@
     return `${y}${m}${day}-${hh}${mm}`;
   }
   exportBtn.addEventListener('click', async () => {
+    if (!validateCredits()) {
+      showToast('모든 이미지의 출처 정보를 입력해야 내보낼 수 있습니다.');
+      return;
+    }
     const defaultName = 'cardnews-' + currentRatio.replace(':', 'x') + '-' + formatDate(new Date());
     const name = await askFilename('PNG 파일명', defaultName, '.png');
     if (name === null) return;
@@ -1534,6 +1671,87 @@
     showToast('PNG로 저장되었습니다.', 'success');
   });
 
+  function updateCreditLayer(img) {
+    if (!img.credit) {
+      // credit 오브젝트 제거
+      const existing = canvas.getObjects().find(o => o.layerType === 'credit' && o._ownerUid === img.__uid);
+      if (existing) canvas.remove(existing);
+      return;
+    }
+    let text;
+    if (img.credit.type === 'self') {
+      text = 'ⓘ 본인 제작';
+    } else {
+      const url = img.credit.url || '';
+      const detail = img.credit.detail || '';
+      text = 'ⓘ ' + (detail ? detail + ' · ' : '') + url;
+    }
+
+    let existing = canvas.getObjects().find(o => o.layerType === 'credit' && o._ownerUid === img.__uid);
+    if (existing) {
+      existing.set('text', text);
+      canvas.requestRenderAll();
+      return;
+    }
+    // 새로 생성
+    const t = new fabric.IText(text, {
+      left: canvas.getWidth() - 30,
+      top: canvas.getHeight() - 40,
+      originX: 'right',
+      originY: 'bottom',
+      fontSize: Math.max(14, Math.round(canvas.getWidth() * 0.015)),
+      fill: 'rgba(255,255,255,0.85)',
+      fontFamily: 'Quicksand',
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      padding: 6,
+      editable: true,
+    });
+    t.layerType = 'credit';
+    t._ownerUid = img.__uid;   // 어떤 이미지의 출처인지
+    t.name = '출처';
+    canvas.add(t);
+    canvas.bringToFront(t);
+    refreshLayers();
+  }
+  function refreshAllCredits() {
+    const imgs = canvas.getObjects().filter(o => o.layerType === 'image');
+    const credits = [];
+    imgs.forEach(img => {
+      if (!img.credit) return;
+      if (img.credit.type === 'self') credits.push('본인 제작');
+      else if (img.credit.detail) credits.push(img.credit.detail);
+      else if (img.credit.url) credits.push(shortUrl(img.credit.url));
+    });
+
+    let creditObj = canvas.getObjects().find(o => o.layerType === 'credit');
+    if (credits.length === 0) {
+      if (creditObj) canvas.remove(creditObj);
+      return;
+    }
+    const text = 'ⓘ ' + credits.join(' · ');
+    if (creditObj) {
+      creditObj.set('text', text);
+    } else {
+      creditObj = new fabric.IText(text, {
+        left: canvas.getWidth() - 30,
+        top: canvas.getHeight() - 40,
+        originX: 'right',
+        originY: 'bottom',
+        fontSize: Math.max(14, Math.round(canvas.getWidth() * 0.015)),
+        fill: 'rgba(255,255,255,0.85)',
+        fontFamily: 'Quicksand',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        padding: 6,
+        editable: true,
+      });
+      creditObj.layerType = 'credit';
+      creditObj.name = '출처';
+      canvas.add(creditObj);
+    }
+    canvas.bringToFront(creditObj);
+    refreshLayers();
+    canvas.requestRenderAll();
+  }
   // ---------- 초기화 ----------
   function initEditor() {
     applyCanvasSize();
