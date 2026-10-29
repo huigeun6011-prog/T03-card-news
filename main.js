@@ -60,6 +60,9 @@
   const fontSizeInput   = $('fontSizeInput');
   const colorInput      = $('colorInput');
   const deleteBtn       = $('deleteBtn');
+  const jsonFileInput = $('jsonFileInput');
+  const saveJsonBtn   = $('saveJsonBtn');
+  const loadJsonBtn   = $('loadJsonBtn');
   const fileInput   = $('fileInput');
   const toastContainer = $('toastContainer');
   const modalOverlay = $('modalOverlay');
@@ -472,6 +475,7 @@
         container.style.height = (h * zoom) + 'px';
         container.style.transformOrigin = '0 0';
         container.style.transform = 'translate(' + panX + 'px, ' + panY + 'px)';
+        container.style.boxShadow = '0 0 0 2px var(--checker-a)';
     }
 
     // lower / upper 캔버스 레이어 크기 명시 (컨테이너 안에서 100%로 채움)
@@ -619,7 +623,42 @@
     if (history.stack.length > history.max) history.stack.shift();
     history.index = history.stack.length - 1;
     updateHistoryUI();
+    scheduleAutosave();
   }
+
+// ---------- 임시저장 (localStorage) ----------
+const AUTOSAVE_KEY = 'cardnews.autosave.v1';
+let autosaveTimer = null;
+
+function scheduleAutosave() {
+  if (autosaveTimer) return;
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    saveToLocalStorage();
+  }, 400);
+}
+
+function saveToLocalStorage() {
+  try {
+    const snap = snapshot();
+    // 이미지 소스(blob URL)는 세션 종료 시 무효화되므로 저장하지 않음
+    snap.objects.forEach(o => {
+      if (o.type === 'image') {
+        delete o.src;
+      }
+    });
+    // 이미지 자체는 저장 안 하지만, "이미지가 있었는지"는 알아야 복원 시 안내 가능
+    snap.hasImage = !!bgImage;
+    snap.imageName = bgImage ? bgImage.name : null;
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snap));
+  } catch (e) {
+    console.warn('임시저장 실패:', e);
+  }
+}
+
+function clearLocalStorage() {
+  try { localStorage.removeItem(AUTOSAVE_KEY); } catch (e) {}
+}
 
   function updateHistoryUI() {
     undoBtn.disabled = history.index <= 0;
@@ -837,11 +876,93 @@
   async function handleIncomingFile(file) {
     const r = await validateImageFile(file);
     if (!r.ok) { showToast('거절됨: ' + r.reason); return; }
+
+    // 대기 중인 JSON 복원이 있으면 그 흐름으로
+    if (pendingImageUpload) {
+      const snap = pendingImageUpload.snap;
+      pendingImageUpload = null;
+      // 이미지 로드 + 스냅샷의 텍스트만 복원
+      await restoreWithNewImage(snap, file);
+      return;
+    }
+
     if (bgImage) {
       const ok = await openModal('이미 올라온 이미지가 있습니다. 새 이미지로 교체할까요?');
       if (!ok) return;
     }
     loadBackgroundImage(file);
+  }
+
+  async function restoreWithNewImage(snap, file) {
+    const url = URL.createObjectURL(file);
+    await new Promise((resolve) => {
+      fabric.Image.fromURL(url, (img) => {
+        // 스냅샷에 있던 이미지 오브젝트의 위치/스케일 정보
+        const imgSnap = snap.objects.find(o => o.type === 'image');
+        // 캔버스 크기 복원
+        currentRatio = snap.ratio;
+        ratioSelect.value = snap.ratio;
+        imageNatural = snap.imageNatural ? { ...snap.imageNatural } : { w: img.width, h: img.height };
+        canvas.setWidth(snap.canvasW);
+        canvas.setHeight(snap.canvasH);
+        canvas.clear();
+        canvas.backgroundColor = null;
+
+        // 이미지 배치
+        img.set({
+          selectable: true, hasControls: true, hasBorders: true,
+          lockRotation: true, lockUniScaling: true, hoverCursor: 'move',
+          originX: 'left', originY: 'top',
+        });
+        img.layerType = 'image';
+        img.name = (imgSnap && imgSnap.name) || file.name || '이미지';
+        img._src = url;
+
+        if (imgSnap) {
+          img.set({
+            left: imgSnap.left, top: imgSnap.top,
+            scaleX: imgSnap.scaleX, scaleY: imgSnap.scaleY,
+            angle: imgSnap.angle,
+            originX: imgSnap.originX, originY: imgSnap.originY,
+          });
+        } else {
+          placeImageCentralCrop(img);
+        }
+
+        canvas.add(img);
+        canvas.sendToBack(img);
+        bgImage = img;
+
+        // 텍스트 복원
+        snap.objects.filter(o => o.type === 'text').forEach(o => {
+          const t = new fabric.IText(o.text || '', {
+            left: o.left, top: o.top,
+            scaleX: o.scaleX, scaleY: o.scaleY,
+            angle: o.angle,
+            originX: o.originX, originY: o.originY,
+            fontSize: o.fontSize, fontFamily: o.fontFamily,
+            fill: o.fill, textAlign: o.textAlign,
+            width: o.width, editable: true,
+            backgroundColor: o.backgroundColor || '',
+            stroke: o.stroke || '', strokeWidth: o.strokeWidth || 0,
+            paintFirst: 'stroke',
+          });
+          t.layerType = 'text';
+          t.name = o.name;
+          t.__uid = o.__uid;
+          canvas.add(t);
+        });
+
+        emptyHint.style.display = 'none';
+        applyViewToDOM();
+        fitView();
+        refreshLayers();
+        updateSelectionUI();
+        pushHistory();
+        showToast('이미지와 편집 상태가 복원되었습니다.', 'success');
+        resolve();
+      });
+    });
   }
 
   // ---------- 드래그 앤 드롭 ----------
@@ -1217,6 +1338,14 @@
     }
   });
 
+  window.addEventListener('beforeunload', () => {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+    saveToLocalStorage();
+  });
+
   // ---------- 줌 컨트롤 ----------
   zoomRange.addEventListener('input', () => {
     setZoomCenter(parseInt(zoomRange.value, 10) / 100);
@@ -1306,6 +1435,93 @@
   showToast('PNG로 저장되었습니다.', 'success');
   });
 
+  // ---------- JSON 저장 ----------
+saveJsonBtn.addEventListener('click', () => {
+  const snap = snapshot();
+  // 이미지는 저장하지 않음
+  snap.objects.forEach(o => {
+    if (o.type === 'image') delete o.src;
+  });
+  snap.hasImage = !!bgImage;
+  snap.imageName = bgImage ? bgImage.name : null;
+  snap.savedAt = new Date().toISOString();
+
+  const blob = new Blob([JSON.stringify(snap, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cardnews-' + currentRatio.replace(':', 'x') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('JSON으로 저장되었습니다.', 'success');
+});
+
+// ---------- JSON 불러오기 ----------
+loadJsonBtn.addEventListener('click', () => jsonFileInput.click());
+jsonFileInput.addEventListener('change', async () => {
+  const file = jsonFileInput.files[0];
+  jsonFileInput.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const snap = JSON.parse(text);
+    const err = validateSnapshot(snap);
+    if (err) {
+      showToast('불러오기 실패: ' + err);
+      return;
+    }
+    await loadSnapshotWithImagePrompt(snap, '불러온 JSON');
+  } catch (e) {
+    console.warn(e);
+    showToast('불러오기 실패: JSON 형식이 아닙니다.');
+  }
+});
+
+// 스냅샷 검증
+function validateSnapshot(snap) {
+  if (!snap || typeof snap !== 'object') return 'JSON 형식이 아닙니다.';
+  if (typeof snap.ratio !== 'string' || !RATIO_VALUES[snap.ratio]) return 'ratio 값이 잘못되었습니다.';
+  if (!Array.isArray(snap.objects)) return 'objects 배열이 없습니다.';
+  if (typeof snap.canvasW !== 'number' || typeof snap.canvasH !== 'number') return '캔버스 크기 정보가 없습니다.';
+  // 필수 필드 최소 검사
+  for (const o of snap.objects) {
+    if (o.type !== 'text' && o.type !== 'image') continue;
+    if (o.type === 'text' && typeof o.text !== 'string') return '텍스트 객체 형식 오류.';
+  }
+  return null;
+}
+
+// 스냅샷 복원 + 이미지 재업로드 프롬프트
+async function loadSnapshotWithImagePrompt(snap, sourceLabel) {
+  // 이미지가 있었으면 재업로드 요청
+  const hasImage = snap.hasImage || snap.objects.some(o => o.type === 'image');
+  if (hasImage) {
+    const ok = await openModal(
+      sourceLabel + '에 이미지가 포함되어 있지 않습니다.\n' +
+      '같은 이미지를 다시 업로드하면 편집 상태가 그대로 복원됩니다.\n' +
+      '(취소하면 텍스트만 복원됩니다.)'
+    );
+    if (ok) {
+      // 이미지 업로드를 기다리는 상태로 전환 후 종료
+      pendingImageUpload = { snap: snap };
+      showToast('이미지를 드롭하거나 선택하세요.', 'success');
+      // 텍스트만이라도 먼저 복원해두기 (이미지 없이)
+      const textOnly = JSON.parse(JSON.stringify(snap));
+      textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
+      await restoreSnapshot(textOnly);
+      // 이미지 자리 표시 안 함 (재업로드 시 교체)
+      return;
+    }
+  }
+  // 이미지 없이 복원
+  await restoreSnapshot(snap);
+  showToast('불러왔습니다.', 'success');
+}
+
+let pendingImageUpload = null;
+
   // ---------- 리사이즈 ----------
   window.addEventListener('resize', fitView);
 
@@ -1324,6 +1540,38 @@
       fitView();
       scheduleMinimap();
     });
+
+    // 새로고침 후 임시저장 자동 복원
+    const saved = localStorage.getItem(AUTOSAVE_KEY);
+    if (saved) {
+      try {
+        const snap = JSON.parse(saved);
+        const err = validateSnapshot(snap);
+        if (!err) {
+          if (snap.hasImage) {
+            // 이미지는 재업로드 필요 → 안내만 (자동 복원 시엔 조용히)
+            openModal('이전 작업이 임시저장되어 있습니다.\n이미지가 포함되어 있지 않으니 같은 이미지를 다시 업로드하면 복원됩니다.')
+              .then((ok) => {
+                if (!ok) {
+                  // 취소 시 그냥 텍스트만 복원
+                  const textOnly = JSON.parse(JSON.stringify(snap));
+                  textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
+                  restoreSnapshot(textOnly);
+                } else {
+                  pendingImageUpload = { snap: snap };
+                  const textOnly = JSON.parse(JSON.stringify(snap));
+                  textOnly.objects = textOnly.objects.filter(o => o.type !== 'image');
+                  restoreSnapshot(textOnly);
+                }
+              });
+          } else {
+            restoreSnapshot(snap);
+          }
+        }
+      } catch (e) {
+        console.warn('임시저장 복원 실패:', e);
+      }
+    }
   }
 
   if (CUSTOM_FONTS.length === 0) {

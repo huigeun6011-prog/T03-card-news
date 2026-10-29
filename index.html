@@ -27,6 +27,12 @@
   <div class="tb-spacer"></div>
 
   <div class="tb-group">
+    <button id="loadJsonBtn" type="button">JSON 불러오기</button>
+    <button id="saveJsonBtn" type="button">JSON 저장</button>
+    <button id="exportBtn" type="button" class="primary">PNG 내보내기</button>
+  </div>
+
+  <div class="tb-group">
     <button id="exportBtn" type="button" class="primary">PNG 내보내기</button>
   </div>
 </header>
@@ -118,6 +124,7 @@
   </aside>
 </main>
 
+<input id="jsonFileInput" type="file" accept="application/json,.json" hidden>
 <input id="fileInput" type="file" accept="image/png,image/jpeg" hidden>
 
 <div id="toastContainer"></div>
