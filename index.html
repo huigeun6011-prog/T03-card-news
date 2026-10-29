@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>카드뉴스 편집기</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+</head>
+<body>
+
+<header id="topbar">
+  <div class="tb-group">
+    <label>비율</label>
+    <select id="ratioSelect">
+      <option value="1:1">1 : 1</option>
+      <option value="4:5">4 : 5</option>
+      <option value="9:16">9 : 16</option>
+    </select>
+  </div>
+
+  <div class="tb-group">
+    <button id="undoBtn" type="button" disabled title="실행취소 (Ctrl+Z)">↶ 실행취소</button>
+    <button id="redoBtn" type="button" disabled title="재실행 (Ctrl+Shift+Z)">↷ 재실행</button>
+  </div>
+
+  <div class="tb-spacer"></div>
+
+  <div class="tb-group">
+    <button id="exportBtn" type="button" class="primary">PNG 내보내기</button>
+  </div>
+</header>
+
+<main id="layout">
+
+  <!-- 좌측: 레이어 -->
+  <aside id="leftPanel">
+    <div class="panel-title">레이어 <span id="layerCount">0</span></div>
+    <ul id="layerList"></ul>
+  </aside>
+
+  <!-- 중앙: 캔버스 -->
+  <section id="stageWrap">
+    <canvas id="c"></canvas>
+    <div id="emptyHint">이미지를 이 페이지 어디든 드롭하거나 클릭해서 선택하세요</div>
+  </section>
+
+  <!-- 우측: 뷰포트 + 텍스트 속성 + 미니맵 -->
+  <aside id="rightPanel">
+
+    <div class="panel-section">
+      <div class="panel-title">뷰포트</div>
+      <div class="zoom-row">
+        <input type="range" id="zoomRange" min="2" max="400" value="100" step="1">
+        <span id="zoomLabel">100%</span>
+      </div>
+      <div class="btn-row">
+        <button id="zoomOutBtn" type="button">−</button>
+        <button id="zoomInBtn" type="button">+</button>
+        <button id="fitViewBtn" type="button">화면 맞춤</button>
+      </div>
+    </div>
+
+    <div class="panel-section" id="textSection">
+      <div class="panel-title">텍스트</div>
+
+      <!-- 텍스트 추가 버튼: 여기로 이동 -->
+      <div class="add-text-row">
+        <button id="addTextBtn" type="button">+ 텍스트 추가</button>
+      </div>
+
+      <div id="textEmpty" class="empty-note">텍스트를 선택하세요</div>
+
+      <div id="textControls" hidden>
+        <label class="field-label">폰트</label>
+        <input id="fontFamilyInput" list="fontList" placeholder="폰트명 입력" autocomplete="off">
+        <datalist id="fontList"></datalist>
+
+        <label class="field-label">크기</label>
+        <input id="fontSizeInput" type="number" min="1" max="400" value="48">
+
+        <label class="field-label">색상</label>
+        <input id="colorInput" type="color" value="#ff8fab">
+
+        <label class="field-label">정렬</label>
+        <div class="align-buttons">
+          <button type="button" data-align="left">좌측</button>
+          <button type="button" data-align="center">중앙</button>
+          <button type="button" data-align="right">우측</button>
+        </div>
+
+        <label class="field-label">배경색</label>
+        <div class="inline-row">
+          <input type="checkbox" id="bgColorNone" checked>
+          <label for="bgColorNone" class="inline-label">없음</label>
+          <input id="bgColorInput" type="color" value="#ffffff" disabled>
+        </div>
+
+        <label class="field-label">외곽선</label>
+        <div class="inline-row">
+          <input id="strokeColorInput" type="color" value="#000000">
+          <input id="strokeWidthInput" type="number" min="0" max="20" value="0" step="0.5" title="두께">
+        </div>
+
+        <button id="deleteBtn" type="button" class="danger">선택 삭제</button>
+      </div>
+    </div>
+
+    <!-- 미니맵 -->
+    <div class="panel-section" id="minimapSection">
+      <div class="panel-title">미니맵</div>
+      <div id="minimapBox">
+        <img id="minimapImg" alt="">
+        <div id="minimapViewport"></div>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<input id="fileInput" type="file" accept="image/png,image/jpeg" hidden>
+
+<div id="toastContainer"></div>
+
+<div id="modalOverlay" hidden>
+  <div id="modalBox">
+    <p id="modalMessage"></p>
+    <div class="modal-actions">
+      <button id="modalCancel" type="button">취소</button>
+      <button id="modalConfirm" type="button">확인</button>
+    </div>
+  </div>
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>
