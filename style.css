@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Varela+Round&family=Quicksand&family=Montserrat&family=Jua&family=Noto+Sans+KR&display=swap');
+
 :root {
   --pink:        #ff8fab;
   --pink-light:  #ffd6e0;
@@ -425,4 +427,40 @@ body.dragging #stageWrap::after {
   background: rgba(255, 143, 171, 0.15);
   pointer-events: none;
   box-sizing: border-box;
+}
+/* 외곽선 행 전용 */
+.inline-row.stroke-row {
+  gap: 8px;
+}
+.inline-row.stroke-row input[type=color] {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.inline-row.stroke-row input[type=color]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.inline-row.stroke-row input[type=color]::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+.inline-row.stroke-row input[type=color]::-moz-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+.inline-row.stroke-row input[type=number] {
+  flex: 1;
+  width: auto;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
 }

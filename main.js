@@ -14,11 +14,27 @@
     '4:5':  4 / 5,
     '9:16': 9 / 16,
   };
+
+  // ---------- 폰트 목록 ----------
   const FONT_LIST = [
-    'Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS',
-    'Times New Roman', 'Georgia', 'Garamond', 'Courier New',
-    'Malgun Gothic', 'Apple SD Gothic Neo', 'Nanum Gothic', 'Dotum', 'Gulim', 'Batang',
-    'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy',
+    // 영문
+    'Pacifico', 'Varela Round', 'Quicksand', 'Montserrat',
+    // 한글
+    'Jua', 'Noto Sans KR',
+    // 시스템 폰트 (폴백용)
+    'Arial', 'Helvetica', 'Verdana',
+    'Malgun Gothic', 'Apple SD Gothic Neo',
+    'sans-serif', 'serif', 'monospace',
+  ];
+
+  // ---------- 커스텀 폰트 (구글 폰트 CDN) ----------
+  const CUSTOM_FONTS = [
+    'Pacifico',
+    'Varela Round',
+    'Quicksand',
+    'Montserrat',
+    'Jua',
+    'Noto Sans KR',
   ];
 
   // ---------- DOM ----------
@@ -102,7 +118,6 @@
   const canvas = new fabric.Canvas('c', {
     backgroundColor: null,
     preserveObjectStacking: true,
-    selection: false,
   });
 
   fabric.Object.prototype.set({
@@ -360,6 +375,10 @@
   }
 
   function renderMinimap() {
+    const activeObj = canvas.getActiveObject();
+    // 편집 중이면 미니맵 렌더 스킵 (포커스 보호)
+    if (activeObj && activeObj.isEditing) return;
+
     const g = getMinimapGeometry();
     if (!g) return;
 
@@ -375,7 +394,6 @@
     canvasEl.style.backgroundColor = '#ffffff';
     canvasEl.style.backgroundImage = 'none';
 
-    const activeObj = canvas.getActiveObject();
     if (activeObj) canvas.discardActiveObject();
     clearSnapGuides();
     canvas.requestRenderAll();
@@ -396,7 +414,6 @@
     minimapImg.style.left = g.offsetX + 'px';
     minimapImg.style.top = g.offsetY + 'px';
 
-    // 뷰포트 사각형 갱신
     updateMinimapViewport();
   }
 
@@ -680,6 +697,7 @@
         backgroundColor: o.backgroundColor || '',
         stroke: o.stroke || '',
         strokeWidth: o.strokeWidth || 0,
+        paintFirst: 'stroke',
       });
       t.layerType = 'text';
       t.name = o.name;
@@ -871,9 +889,10 @@
       originX: 'center', originY: 'center',
       fontSize: 48,
       fill: '#ff8fab',
-      fontFamily: 'Arial',
+      fontFamily: 'Quicksand',   // ← Arial에서 변경
       textAlign: 'center',
       editable: true,
+      paintFirst: 'stroke',
     });
     t.layerType = 'text';
     t.name = '텍스트';
@@ -889,36 +908,55 @@
 
   // ---------- 선택 UI ----------
   function updateSelectionUI() {
-    const obj = canvas.getActiveObject();
-    const isText = obj && obj.layerType === 'text';
-    textControls.hidden = !isText;
-    textEmpty.hidden = !!isText;
-    if (isText) updateTextControls();
+    const objs = canvas.getActiveObjects();
+    const single = objs.length === 1 ? objs[0] : null;
+    const isSingleText = single && single.layerType === 'text';
+
+    textControls.hidden = !isSingleText;
+    textEmpty.hidden = !!isSingleText || objs.length > 1;
+    deleteBtn.disabled = objs.length === 0;
+
+    if (isSingleText) updateTextControls();
     highlightLayerList();
   }
 
   function updateTextControls() {
     const obj = canvas.getActiveObject();
     if (!obj || obj.layerType !== 'text') return;
-    fontFamilyInput.value = obj.fontFamily || '';
-    fontSizeInput.value = Math.round(obj.fontSize || 48);
-    colorInput.value = toHex(obj.fill);
-    document.querySelectorAll('.align-buttons button').forEach(b =>
-      b.classList.toggle('active', b.dataset.align === (obj.textAlign || 'left')));
+
+    if (document.activeElement !== fontFamilyInput) {
+      fontFamilyInput.value = obj.fontFamily || '';
+    }
+    if (document.activeElement !== fontSizeInput) {
+      fontSizeInput.value = Math.round(obj.fontSize || 48);
+    }
+    if (document.activeElement !== colorInput) {
+      colorInput.value = toHex(obj.fill);
+    }
+    // 정렬 버튼은 항상 갱신
+    document.querySelectorAll('.align-buttons button').forEach((b) =>
+      b.classList.toggle('active', b.dataset.align === (obj.textAlign || 'left'))
+    );
 
     // 배경색
-    if (obj.backgroundColor) {
-      bgColorNone.checked = false;
-      bgColorInput.disabled = false;
-      bgColorInput.value = toHex(obj.backgroundColor);
-    } else {
-      bgColorNone.checked = true;
-      bgColorInput.disabled = true;
+    if (document.activeElement !== bgColorInput) {
+      if (obj.backgroundColor) {
+        bgColorNone.checked = false;
+        bgColorInput.disabled = false;
+        bgColorInput.value = toHex(obj.backgroundColor);
+      } else {
+        bgColorNone.checked = true;
+        bgColorInput.disabled = true;
+      }
     }
 
     // 외곽선
-    strokeColorInput.value = toHex(obj.stroke || '#000000');
-    strokeWidthInput.value = obj.strokeWidth || 0;
+    if (document.activeElement !== strokeColorInput) {
+      strokeColorInput.value = toHex(obj.stroke || '#000000');
+    }
+    if (document.activeElement !== strokeWidthInput) {
+      strokeWidthInput.value = obj.strokeWidth || 0;
+    }
   }
 
   function toHex(c) {
@@ -993,10 +1031,29 @@
     obj.set('fontFamily', fontFamilyInput.value || 'Arial');
     canvas.requestRenderAll();
   });
-  fontFamilyInput.addEventListener('change', () => {
+  fontFamilyInput.addEventListener('change', async () => {
     const obj = canvas.getActiveObject();
     if (!obj || obj.layerType !== 'text') return;
+    const family = fontFamilyInput.value || 'Arial';
+    // 폰트 로드 보장
+    try {
+      await document.fonts.load(`16px "${family}"`);
+    } catch (e) {}
+    obj.set('fontFamily', family);
+    canvas.requestRenderAll();
     pushHistory();
+  });
+  // 포커스 시 전체 목록 표시를 위해 값 비우기
+  fontFamilyInput.addEventListener('focus', () => {
+    fontFamilyInput.dataset.prevValue = fontFamilyInput.value;
+    fontFamilyInput.value = '';
+  });
+
+  // 포커스 아웃 시 원래 값 복원 (단, 사용자가 새 값을 입력했으면 그 값 유지)
+  fontFamilyInput.addEventListener('blur', () => {
+    if (!fontFamilyInput.value) {
+      fontFamilyInput.value = fontFamilyInput.dataset.prevValue || '';
+    }
   });
   fontSizeInput.addEventListener('input', () => {
     const obj = canvas.getActiveObject();
@@ -1074,22 +1131,32 @@
   canvas.on('selection:cleared', updateSelectionUI);
   canvas.on('object:added', refreshLayers);
   canvas.on('object:removed', refreshLayers);
-  canvas.on('text:changed', e => {
+  canvas.on('text:changed', (e) => {
     if (e.target) {
       e.target.name = (e.target.text || '텍스트').slice(0, 20);
-      refreshLayers();
+      const li = layerListEl.querySelector('li[data-uid="' + e.target.__uid + '"]');
+      if (li) {
+        const labelSpan = li.querySelector('span:not(.type-tag)');
+        if (labelSpan) labelSpan.textContent = e.target.name;
+      }
     }
+    // 편집 중엔 미니맵 갱신하지 않음
+    if (e.target && e.target.isEditing) return;
+    scheduleMinimap();
   });
-  canvas.on('object:modified', opt => {
-    if (opt.target === bgImage) enforceBgCoverage();
+  canvas.on('object:modified', (opt) => {
+    // 편집 중이면 히스토리 푸시 스킵 (editing:exited에서 처리)
+    if (opt.target && opt.target.isEditing) return;
     pushHistory();
   });
-  canvas.on('text:editing:exited', () => pushHistory());
+  canvas.on('text:editing:exited', () => {
+    pushHistory();
+    scheduleMinimap();
+  });
   // ---------- 미니맵 갱신 트리거 ----------
   canvas.on('object:added', () => scheduleMinimap());
   canvas.on('object:removed', () => scheduleMinimap());
   canvas.on('object:modified', () => scheduleMinimap());
-  canvas.on('text:changed', () => scheduleMinimap());
 
   // ---------- 휠 = 카드 줌 (커서 기준) ----------
   // preventDefault 필수: 브라우저 기본 스크롤/페이지 줌 방지
@@ -1106,12 +1173,10 @@
   let spaceDown = false;
 
   // 캔버스 위 마우스 다운
-  canvas.on('mouse:down', opt => {
+  canvas.on('mouse:down', (opt) => {
     const e = opt.e;
-    // 빈 곳에서 시작하면 무조건 팬
-    // (단, Alt 또는 Space 상태면 어떤 대상 위에서도 팬)
-    const isEmpty = !opt.target;
-    if (isEmpty || e.altKey || spaceDown) {
+    // Alt 또는 Space 상태면 어떤 대상 위에서도 팬
+    if (e.altKey || spaceDown) {
       isPanning = true;
       panStartX = e.clientX;
       panStartY = e.clientY;
@@ -1122,6 +1187,7 @@
       updateSelectionUI();
       stageWrap.style.cursor = 'grabbing';
     }
+    // 그 외 빈 곳 드래그는 Fabric이 마퀴 선택으로 처리
   });
 
   // stageWrap 자체에도 mousedown 등록: 캔버스 바깥(어두운 영역)에서 시작해도 팬
@@ -1244,21 +1310,34 @@
   window.addEventListener('resize', fitView);
 
   // ---------- 초기화 ----------
-  applyCanvasSize();
-  refreshLayers();
-  updateSelectionUI();
-  updateHistoryUI();
-  pushHistory();
+    // ---------- 초기화 ----------
+  function initEditor() {
+    applyCanvasSize();
+    refreshLayers();
+    updateSelectionUI();
+    updateHistoryUI();
+    pushHistory();
 
-  // 미니맵 최초 렌더 (레이아웃이 잡힌 뒤)
-  setTimeout(() => {
-    renderMinimap();
-  }, 60);
+    setTimeout(() => { renderMinimap(); }, 60);
 
-  // 리사이즈: 뷰 맞춤 + 미니맵 갱신
-  window.addEventListener('resize', () => {
-    fitView();
-    scheduleMinimap();
-  });
+    window.addEventListener('resize', () => {
+      fitView();
+      scheduleMinimap();
+    });
+  }
+
+  if (CUSTOM_FONTS.length === 0) {
+    initEditor();
+  } else {
+    Promise.all(
+      CUSTOM_FONTS.map((family) =>
+        document.fonts.load(`16px "${family}"`).catch((err) => {
+          console.warn('폰트 로드 실패:', family, err);
+        })
+      )
+    ).then(() => {
+      initEditor();
+    });
+  }
 
 })();
